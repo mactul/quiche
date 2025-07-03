@@ -126,7 +126,8 @@ fn make_resource_writer(
             Ok(f) => return Some(std::io::BufWriter::new(f)),
 
             Err(e) => panic!(
-                "Error creating file for {url}, attempted path was {path}: {e}"
+                "Error creating file for {}, attempted path was {}: {}",
+                url, path, e
             ),
         }
     }
@@ -156,8 +157,10 @@ pub fn make_qlog_writer(
     match std::fs::File::create(&path) {
         Ok(f) => std::io::BufWriter::new(f),
 
-        Err(e) =>
-            panic!("Error creating qlog file attempted path was {path:?}: {e}"),
+        Err(e) => panic!(
+            "Error creating qlog file attempted path was {:?}: {}",
+            path, e
+        ),
     }
 }
 
@@ -354,12 +357,6 @@ pub trait HttpConn {
     );
 }
 
-pub fn writable_response_streams(
-    conn: &quiche::Connection,
-) -> impl Iterator<Item = u64> {
-    conn.writable().filter(|id| id % 4 == 0)
-}
-
 /// Represents an HTTP/0.9 formatted request.
 pub struct Http09Request {
     url: url::Url,
@@ -427,7 +424,7 @@ impl Http09Conn {
         }
 
         let h_conn = Http09Conn {
-            stream_id: 0,
+            stream_id: 4,
             reqs_sent: 0,
             reqs_complete: 0,
             reqs,
@@ -458,12 +455,16 @@ impl HttpConn for Http09Conn {
                 },
 
                 Err(e) => {
-                    error!("failed to send request {e:?}");
+                    error!("failed to send request {:?}", e);
                     break;
                 },
             };
 
-            debug!("sending HTTP request {:?}", req.request_line);
+            trace!(
+                "sending HTTP request {:?} on stream_id {}",
+                req.request_line,
+                self.stream_id
+            );
 
             req.stream_id = Some(self.stream_id);
             req.response_writer =
@@ -484,7 +485,7 @@ impl HttpConn for Http09Conn {
         // Process all readable streams.
         for s in conn.readable() {
             while let Ok((read, fin)) = conn.stream_recv(s, buf) {
-                trace!("received {read} bytes");
+                trace!("received {} bytes", read);
 
                 let stream_buf = &buf[..read];
 
@@ -539,7 +540,7 @@ impl HttpConn for Http09Conn {
                             // Already closed.
                             Ok(_) | Err(quiche::Error::Done) => (),
 
-                            Err(e) => panic!("error closing conn: {e:?}"),
+                            Err(e) => panic!("error closing conn: {:?}", e),
                         }
 
                         break;
@@ -563,6 +564,7 @@ impl HttpConn for Http09Conn {
 
         false
     }
+
 
     fn handle_requests(
         &mut self, conn: &mut quiche::Connection,
@@ -677,12 +679,7 @@ impl HttpConn for Http09Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
-        debug!(
-            "{} response stream {} is writable with capacity {:?}",
-            conn.trace_id(),
-            stream_id,
-            conn.stream_capacity(stream_id)
-        );
+        trace!("{} stream {} is writable", conn.trace_id(), stream_id);
 
         if !partial_responses.contains_key(&stream_id) {
             return;
@@ -809,7 +806,7 @@ impl Http3Conn {
                         header.splitn(2, ": ").collect();
 
                     if header_split.len() != 2 {
-                        panic!("malformed header provided - \"{header}\"");
+                        panic!("malformed header provided - \"{}\"", header);
                     }
 
                     hdrs.push(quiche::h3::Header::new(
@@ -1147,7 +1144,7 @@ impl HttpConn for Http3Conn {
                 },
 
                 Err(e) => {
-                    error!("failed to send request {e:?}");
+                    error!("failed to send request {:?}", e);
                     break;
                 },
             };
@@ -1190,7 +1187,7 @@ impl HttpConn for Http3Conn {
                     Err(quiche::h3::Error::Done) => 0,
 
                     Err(e) => {
-                        error!("failed to send request body {e:?}");
+                        error!("failed to send request body {:?}", e);
                         continue;
                     },
                 };
@@ -1209,7 +1206,7 @@ impl HttpConn for Http3Conn {
                     Ok(v) => v,
 
                     Err(e) => {
-                        error!("failed to send dgram {e:?}");
+                        error!("failed to send dgram {:?}", e);
                         break;
                     },
                 }
@@ -1248,7 +1245,8 @@ impl HttpConn for Http3Conn {
                         self.h3_conn.recv_body(conn, stream_id, buf)
                     {
                         debug!(
-                            "got {read} bytes of response data on stream {stream_id}"
+                            "got {} bytes of response data on stream {}",
+                            read, stream_id
                         );
 
                         let req = self
@@ -1308,7 +1306,7 @@ impl HttpConn for Http3Conn {
                             // Already closed.
                             Ok(_) | Err(quiche::Error::Done) => (),
 
-                            Err(e) => panic!("error closing conn: {e:?}"),
+                            Err(e) => panic!("error closing conn: {:?}", e),
                         }
 
                         break;
@@ -1316,13 +1314,13 @@ impl HttpConn for Http3Conn {
                 },
 
                 Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
-                    error!("request was reset by peer with {e}, closing...");
+                    error!("request was reset by peer with {}, closing...", e);
 
                     match conn.close(true, 0x100, b"kthxbye") {
                         // Already closed.
                         Ok(_) | Err(quiche::Error::Done) => (),
 
-                        Err(e) => panic!("error closing conn: {e:?}"),
+                        Err(e) => panic!("error closing conn: {:?}", e),
                     }
 
                     break;
@@ -1352,7 +1350,7 @@ impl HttpConn for Http3Conn {
                 },
 
                 Err(e) => {
-                    error!("HTTP/3 processing failed: {e:?}");
+                    error!("HTTP/3 processing failed: {:?}", e);
 
                     break;
                 },
@@ -1399,9 +1397,6 @@ impl HttpConn for Http3Conn {
         index: &str, buf: &mut [u8],
     ) -> quiche::h3::Result<()> {
         // Process HTTP stream-related events.
-        //
-        // This loops over any and all received HTTP requests and sends just the
-        // HTTP response headers.
         loop {
             match self.h3_conn.poll(conn) {
                 Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
@@ -1460,8 +1455,11 @@ impl HttpConn for Http3Conn {
 
                     #[cfg(feature = "sfv")]
                     let priority =
-                        quiche::h3::Priority::try_from(priority.as_slice())
-                            .unwrap_or_default();
+                        match quiche::h3::Priority::try_from(priority.as_slice())
+                        {
+                            Ok(v) => v,
+                            Err(_) => quiche::h3::Priority::default(),
+                        };
 
                     #[cfg(not(feature = "sfv"))]
                     let priority = quiche::h3::Priority::default();
@@ -1556,11 +1554,6 @@ impl HttpConn for Http3Conn {
             }
         }
 
-        // Visit all writable response streams to send HTTP content.
-        for stream_id in writable_response_streams(conn) {
-            self.handle_writable(conn, partial_responses, stream_id);
-        }
-
         // Process datagram-related events.
         while let Ok(len) = conn.dgram_recv(buf) {
             let mut b = octets::Octets::with_slice(buf);
@@ -1583,7 +1576,7 @@ impl HttpConn for Http3Conn {
                     Ok(v) => v,
 
                     Err(e) => {
-                        error!("failed to send dgram {e:?}");
+                        error!("failed to send dgram {:?}", e);
                         break;
                     },
                 }
@@ -1601,12 +1594,7 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
-        debug!(
-            "{} response stream {} is writable with capacity {:?}",
-            conn.trace_id(),
-            stream_id,
-            conn.stream_capacity(stream_id)
-        );
+        debug!("{} stream {} is writable", conn.trace_id(), stream_id);
 
         if !partial_responses.contains_key(&stream_id) {
             return;

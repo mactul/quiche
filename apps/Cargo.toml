@@ -25,6 +25,7 @@ sfv = ["quiche/sfv"]
 default = ["qlog", "sfv"]
 
 [dependencies]
+bytes = "1"
 docopt = "1"
 env_logger = { workspace = true }
 libc = { workspace = true }
@@ -33,6 +34,7 @@ mio = { workspace = true, features = ["net", "os-poll"] }
 nix = { workspace = true, features = ["net", "socket", "uio"] }
 octets = { workspace = true }
 quiche = { workspace = true }
+quinn-udp = "0.5.13"
 ring = { workspace = true }
 url = { workspace = true }
 

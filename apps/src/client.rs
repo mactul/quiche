@@ -27,15 +27,21 @@
 use crate::args::*;
 use crate::common::*;
 
-use std::io::prelude::*;
-
-use std::rc::Rc;
-
 use std::cell::RefCell;
+use std::io::prelude::*;
+use std::io::IoSliceMut;
+use std::rc::Rc;
 
 use ring::rand::*;
 
+use quinn_udp::RecvMeta;
+use quinn_udp::UdpSocketState;
+use quinn_udp::BATCH_SIZE;
+
+use bytes::BytesMut;
+
 const MAX_DATAGRAM_SIZE: usize = 1350;
+pub const MAX_FLUSH_SIZE: usize = 256_000;
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -48,7 +54,7 @@ pub fn connect(
     args: ClientArgs, conn_args: CommonArgs,
     output_sink: impl FnMut(String) + 'static,
 ) -> Result<(), ClientError> {
-    let mut buf = [0; 65535];
+    let mut buf = [0; 65536 * BATCH_SIZE];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
     let output_sink =
@@ -76,10 +82,15 @@ pub fn connect(
         std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
     };
 
+    // poll based on mio socket; but process information based on quinn-udp socket
+    // wrapper & recvmmsg() / sendmmsg() implementations
+    let socket_std = std::net::UdpSocket::bind(&bind_addr).unwrap();
+    let recv_state = UdpSocketState::new((&socket_std).into()).unwrap();
+    let mut metainfos = [RecvMeta::default(); BATCH_SIZE];
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
     let mut socket =
-        mio::net::UdpSocket::bind(bind_addr.parse().unwrap()).unwrap();
+        mio::net::UdpSocket::from_std(socket_std.try_clone().unwrap());
     poll.registry()
         .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
         .unwrap();
@@ -103,7 +114,10 @@ pub fn connect(
         config
             .load_verify_locations_from_file(trust_origin_ca_pem)
             .map_err(|e| {
-                ClientError::Other(format!("error loading origin CA file : {e}"))
+                ClientError::Other(format!(
+                    "error loading origin CA file : {}",
+                    e
+                ))
             })?;
     } else {
         config.verify_peer(!args.no_verify);
@@ -240,7 +254,7 @@ pub fn connect(
         return Err(ClientError::Other(format!("send() failed: {e:?}")));
     }
 
-    trace!("written {write}");
+    trace!("written {}", write);
 
     let app_data_start = std::time::Instant::now();
 
@@ -275,16 +289,27 @@ pub fn connect(
                 _ => unreachable!(),
             };
 
+            let mut iovs: [IoSliceMut; BATCH_SIZE] = {
+                let mut bufs =
+                    buf.chunks_mut(u16::MAX.into()).map(IoSliceMut::new);
+
+                std::array::from_fn(|_| bufs.next().expect("BATCH_SIZE elements"))
+            };
+
             let local_addr = socket.local_addr().unwrap();
             'read: loop {
-                let (len, from) = match socket.recv_from(&mut buf) {
+                let len = match recv_state.recv(
+                    (&socket_std).into(),
+                    &mut iovs,
+                    &mut metainfos,
+                ) {
                     Ok(v) => v,
 
                     Err(e) => {
                         // There are no more UDP packets to read on this socket.
                         // Process subsequent events.
                         if e.kind() == std::io::ErrorKind::WouldBlock {
-                            trace!("{local_addr}: recv() would block");
+                            trace!("{}: recv() would block", local_addr);
                             break 'read;
                         }
 
@@ -294,35 +319,43 @@ pub fn connect(
                     },
                 };
 
-                trace!("got {len} bytes from {from} to {local_addr}");
-
-                if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
-                    let path = format!("{target_path}/{pkt_count}.pkt");
-
-                    if let Ok(f) = std::fs::File::create(path) {
-                        let mut f = std::io::BufWriter::new(f);
-                        f.write_all(&buf[..len]).ok();
-                    }
-                }
-
-                pkt_count += 1;
+                trace!("{}: got {} datagrams", local_addr, len);
 
                 let recv_info = quiche::RecvInfo {
                     to: local_addr,
-                    from,
+                    from: peer_addr,
                 };
 
-                // Process potentially coalesced packets.
-                let read = match conn.recv(&mut buf[..len], recv_info) {
-                    Ok(v) => v,
+                let mut read = 0;
+                for (meta, buf) in metainfos.iter().zip(iovs.iter_mut()).take(len)
+                {
+                    if let Some(target_path) = conn_args.dump_packet_path.as_ref()
+                    {
+                        let path = format!("{target_path}/{pkt_count}.pkt");
 
-                    Err(e) => {
-                        error!("{local_addr}: recv failed: {e:?}");
-                        continue 'read;
-                    },
-                };
+                        if let Ok(f) = std::fs::File::create(path) {
+                            let mut f = std::io::BufWriter::new(f);
+                            f.write_all(&buf[..meta.len]).ok();
+                        }
+                    }
+                    let mut data: BytesMut = buf[0..meta.len].into();
+                    while !data.is_empty() {
+                        pkt_count += 1;
+                        let mut buf = data.split_to(meta.stride.min(data.len()));
+                        read += match conn.recv(
+                            &mut buf,
+                            recv_info,
+                        ) {
+                            Ok(v) => v,
 
-                trace!("{local_addr}: processed {read} bytes");
+                            Err(e) => {
+                                error!("{}: recv failed: {:?}", local_addr, e);
+                                continue;
+                            },
+                        };
+                    }
+                }
+                trace!("{}: processed {} bytes", local_addr, read);
             }
         }
 
@@ -427,18 +460,25 @@ pub fn connect(
                 quiche::PathEvent::New(..) => unreachable!(),
 
                 quiche::PathEvent::Validated(local_addr, peer_addr) => {
-                    info!("Path ({local_addr}, {peer_addr}) is now validated");
+                    info!(
+                        "Path ({}, {}) is now validated",
+                        local_addr, peer_addr
+                    );
                     conn.migrate(local_addr, peer_addr).unwrap();
                     migrated = true;
                 },
 
                 quiche::PathEvent::FailedValidation(local_addr, peer_addr) => {
-                    info!("Path ({local_addr}, {peer_addr}) failed validation");
+                    info!(
+                        "Path ({}, {}) failed validation",
+                        local_addr, peer_addr
+                    );
                 },
 
                 quiche::PathEvent::Closed(local_addr, peer_addr) => {
                     info!(
-                        "Path ({local_addr}, {peer_addr}) is now closed and unusable"
+                        "Path ({}, {}) is now closed and unusable",
+                        local_addr, peer_addr
                     );
                 },
 
@@ -448,7 +488,8 @@ pub fn connect(
                     new,
                 ) => {
                     info!(
-                        "Peer reused cid seq {cid_seq} (initially {old:?}) on {new:?}"
+                        "Peer reused cid seq {} (initially {:?}) on {:?}",
+                        cid_seq, old, new
                     );
                 },
 
@@ -458,7 +499,7 @@ pub fn connect(
 
         // See whether source Connection IDs have been retired.
         while let Some(retired_scid) = conn.retired_scid_next() {
-            info!("Retiring source CID {retired_scid:?}");
+            info!("Retiring source CID {:?}", retired_scid);
         }
 
         // Provides as many CIDs as possible.
@@ -504,13 +545,18 @@ pub fn connect(
                         Ok(v) => v,
 
                         Err(quiche::Error::Done) => {
-                            trace!("{local_addr} -> {peer_addr}: done writing");
+                            trace!(
+                                "{} -> {}: done writing",
+                                local_addr,
+                                peer_addr
+                            );
                             break;
                         },
 
                         Err(e) => {
                             error!(
-                                "{local_addr} -> {peer_addr}: send failed: {e:?}"
+                                "{} -> {}: send failed: {:?}",
+                                local_addr, peer_addr, e
                             );
 
                             conn.close(false, 0x1, b"fail").ok();
@@ -535,8 +581,10 @@ pub fn connect(
                     }
 
                     trace!(
-                        "written {write} bytes from {local_addr} to {}",
-                        send_info.to
+                        "{} -> {}: written {}",
+                        local_addr,
+                        send_info.to,
+                        write
                     );
                 }
             }
