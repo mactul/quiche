@@ -3,12 +3,12 @@ members = [
   "apps",
   "buffer-pool",
   "datagram-socket",
-  "h3i",
+  # "h3i",
   "octets",
   "qlog",
   "quiche",
   "task-killswitch",
-  "tokio-quiche",
+  # "tokio-quiche",
 ]
 exclude = ["fuzz", "tools/http3_test"]
 resolver = "2"
@@ -39,7 +39,7 @@ env_logger = "0.10"
 foundations = { version = "4", default-features = false }
 futures = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false }
-h3i = { version = "0.5", path = "./h3i" }
+# h3i = { version = "0.5", path = "./h3i" }
 ipnetwork = { version = "0.20" }
 libc = { version = "0.2.76", default-features = false }
 log = { version = "0.4.20" }
@@ -63,7 +63,7 @@ smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.1.0", path = "./task-killswitch" }
 thiserror = { version = "1" }
 tokio = { version = "1.44", default-features = false }
-tokio-quiche = { version = "0.5.0", path = "./tokio-quiche" }
+# tokio-quiche = { version = "0.5.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 triomphe = { version = "0.1" }

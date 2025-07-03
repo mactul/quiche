@@ -50,7 +50,7 @@ gcongestion = []
 fuzzing = []
 
 # Build and expose the FFI API.
-ffi = ["dep:cdylib-link-lines"]
+ffi = []
 
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
