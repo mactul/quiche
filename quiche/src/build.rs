@@ -191,7 +191,7 @@ libdir={}
 
 Name: quiche
 Description: quiche library
-URL: https://github.com/cloudflare/quiche
+URL: https://github.com/mactul/quiche
 Version: {version}
 Libs: -Wl,-rpath,${{libdir}} -L${{libdir}} -lquiche
 Cflags: -I${{includedir}}
@@ -276,10 +276,5 @@ fn main() {
 
     if cfg!(feature = "pkg-config-meta") {
         write_pkg_config();
-    }
-
-    #[cfg(feature = "ffi")]
-    if target_os != "windows" {
-        cdylib_link_lines::metabuild();
     }
 }
