@@ -91,8 +91,9 @@ impl Args for CommonArgs {
         let (alpns, dgrams_enabled) = match (http_version, dgram_proto) {
             ("HTTP/0.9", "none") => (alpns::HTTP_09.to_vec(), false),
 
-            ("HTTP/0.9", _) =>
-                panic!("Unsupported HTTP version and DATAGRAM protocol."),
+            ("HTTP/0.9", _) => {
+                panic!("Unsupported HTTP version and DATAGRAM protocol.")
+            },
 
             ("HTTP/3", "none") => (alpns::HTTP_3.to_vec(), false),
 
@@ -136,7 +137,7 @@ impl Args for CommonArgs {
 
         let early_data = args.get_bool("--early-data");
 
-        let dump_packet_path = if !args.get_str("--dump-packets").is_empty() {
+        let dump_packet_path = if args.get_str("--dump-packets") != "" {
             Some(args.get_str("--dump-packets").to_string())
         } else {
             None
@@ -154,7 +155,7 @@ impl Args for CommonArgs {
         let enable_active_migration = args.get_bool("--enable-active-migration");
 
         let max_field_section_size =
-            if !args.get_str("--max-field-section-size").is_empty() {
+            if args.get_str("--max-field-section-size") != "" {
                 Some(
                     args.get_str("--max-field-section-size")
                         .parse::<u64>()
@@ -165,7 +166,7 @@ impl Args for CommonArgs {
             };
 
         let qpack_max_table_capacity =
-            if !args.get_str("--qpack-max-table-capacity").is_empty() {
+            if args.get_str("--qpack-max-table-capacity") != "" {
                 Some(
                     args.get_str("--qpack-max-table-capacity")
                         .parse::<u64>()
@@ -176,7 +177,7 @@ impl Args for CommonArgs {
             };
 
         let qpack_blocked_streams =
-            if !args.get_str("--qpack-blocked-streams").is_empty() {
+            if args.get_str("--qpack-blocked-streams") != "" {
                 Some(
                     args.get_str("--qpack-blocked-streams")
                         .parse::<u64>()
@@ -318,7 +319,7 @@ impl Args for ClientArgs {
         let version = args.get_str("--wire-version");
         let version = u32::from_str_radix(version, 16).unwrap();
 
-        let dump_response_path = if !args.get_str("--dump-responses").is_empty() {
+        let dump_response_path = if args.get_str("--dump-responses") != "" {
             Some(args.get_str("--dump-responses").to_string())
         } else {
             None
@@ -461,7 +462,6 @@ Options:
   --max-field-section-size BYTES    Max size of uncompressed HTTP/3 field section. Default is unlimited.
   --qpack-max-table-capacity BYTES  Max capacity of QPACK dynamic table decoding. Any value other that 0 is currently unsupported.
   --qpack-blocked-streams STREAMS   Limit of streams that can be blocked while decoding. Any value other that 0 is currently unsupported.
-  --disable-gso               Disable GSO (linux only).
   --disable-pacing            Disable pacing (linux only).
   --initial-cwnd-packets PACKETS      The initial congestion window size in terms of packet count [default: 10].
   -h --help                   Show this screen.
@@ -475,7 +475,6 @@ pub struct ServerArgs {
     pub index: String,
     pub cert: String,
     pub key: String,
-    pub disable_gso: bool,
     pub disable_pacing: bool,
     pub enable_pmtud: bool,
 }
@@ -490,7 +489,6 @@ impl Args for ServerArgs {
         let index = args.get_str("--index").to_string();
         let cert = args.get_str("--cert").to_string();
         let key = args.get_str("--key").to_string();
-        let disable_gso = args.get_bool("--disable-gso");
         let disable_pacing = args.get_bool("--disable-pacing");
         let enable_pmtud = args.get_bool("--enable-pmtud");
 
@@ -501,7 +499,6 @@ impl Args for ServerArgs {
             index,
             cert,
             key,
-            disable_gso,
             disable_pacing,
             enable_pmtud,
         }
