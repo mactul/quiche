@@ -83,4 +83,3 @@ incremental = false
 opt-level = 3
 debug = false
 strip = "none"
-panic = "abort"
