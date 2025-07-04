@@ -80,3 +80,7 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 incremental = false
+opt-level = 3
+debug = false
+strip = "none"
+panic = "abort"
