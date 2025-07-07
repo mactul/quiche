@@ -174,6 +174,10 @@ impl RangeSet {
         self.fixup();
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn push_item(&mut self, item: u64) {
         self.insert(item..item + 1)
     }
