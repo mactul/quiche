@@ -8070,6 +8070,7 @@ impl<F: BufFactory> Connection<F> {
             },
 
             frame::Frame::DatagramHeader { .. } => unreachable!(),
+            frame::Frame::AckFrequency { .. } => todo!(),
         }
 
         Ok(())

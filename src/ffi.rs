@@ -315,6 +315,10 @@ pub extern "C" fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
     config.set_max_ack_delay(v);
 }
 
+pub extern fn quiche_config_ext_set_min_ack_delay(config: &mut Config, v: u64) {
+    config.ext_set_min_ack_delay(v);
+}
+
 #[no_mangle]
 pub extern "C" fn quiche_config_set_disable_active_migration(
     config: &mut Config, v: bool,

@@ -184,6 +184,13 @@ pub enum Frame {
     DatagramHeader {
         length: usize,
     },
+
+    AckFrequency {
+        sequence_number: u64,
+        packet_tolerance: u64,
+        update_max_ack_delay: u64,
+        ignore_order: bool,
+    },
 }
 
 impl Frame {
@@ -330,6 +337,13 @@ impl Frame {
             0x1e => Frame::HandshakeDone,
 
             0x30 | 0x31 => parse_datagram_frame(frame_type, b)?,
+
+            0xaf => Frame::AckFrequency {
+                sequence_number: b.get_varint()?,
+                packet_tolerance: b.get_varint()?,
+                update_max_ack_delay: b.get_varint()?,
+                ignore_order: b.get_u8()? != 0,
+            },
 
             _ => return Err(Error::InvalidFrame),
         };
@@ -593,6 +607,20 @@ impl Frame {
             },
 
             Frame::DatagramHeader { .. } => (),
+
+            Frame::AckFrequency {
+                sequence_number,
+                packet_tolerance,
+                update_max_ack_delay,
+                ignore_order,
+            } => {
+                b.put_varint(0xaf)?;
+
+                b.put_varint(*sequence_number)?;
+                b.put_varint(*packet_tolerance)?;
+                b.put_varint(*update_max_ack_delay)?;
+                b.put_u8(*ignore_order as u8)?;
+            },
         }
 
         Ok(before - b.cap())
@@ -808,6 +836,19 @@ impl Frame {
                 2 + // length, always encode as 2-byte varint
                 *length // data
             },
+
+            Frame::AckFrequency {
+                sequence_number,
+                packet_tolerance,
+                update_max_ack_delay,
+                ..
+            } => {
+                1 + // frame type
+                octets::varint_len(*sequence_number) + // sequence_number
+                octets::varint_len(*packet_tolerance) + // packet_tolerance
+                octets::varint_len(*update_max_ack_delay) + // update_max_ack_delay
+                1 // ignore_order
+            },
         }
     }
 
@@ -836,203 +877,178 @@ impl Frame {
     pub fn to_qlog(&self) -> QuicFrame {
         match self {
             Frame::Padding { len } => QuicFrame::Padding {
-                length: None,
-                payload_length: *len as u32,
-            },
-
+                        length: None,
+                        payload_length: *len as u32,
+                    },
             Frame::Ping { .. } => QuicFrame::Ping {
-                length: None,
-                payload_length: None,
-            },
-
-            Frame::ACK {
-                ack_delay,
-                ranges,
-                ecn_counts,
-            } => {
-                let ack_ranges = AckedRanges::Double(
-                    ranges.iter().map(|r| (r.start, r.end - 1)).collect(),
-                );
-
-                let (ect0, ect1, ce) = match ecn_counts {
-                    Some(ecn) => (
-                        Some(ecn.ect0_count),
-                        Some(ecn.ect1_count),
-                        Some(ecn.ecn_ce_count),
-                    ),
-
-                    None => (None, None, None),
-                };
-
-                QuicFrame::Ack {
-                    ack_delay: Some(*ack_delay as f32 / 1000.0),
-                    acked_ranges: Some(ack_ranges),
-                    ect1,
-                    ect0,
-                    ce,
-                    length: None,
-                    payload_length: None,
-                }
-            },
-
-            Frame::ResetStream {
-                stream_id,
-                error_code,
-                final_size,
-            } => QuicFrame::ResetStream {
-                stream_id: *stream_id,
-                error_code: *error_code,
-                final_size: *final_size,
-                length: None,
-                payload_length: None,
-            },
-
-            Frame::StopSending {
-                stream_id,
-                error_code,
-            } => QuicFrame::StopSending {
-                stream_id: *stream_id,
-                error_code: *error_code,
-                length: None,
-                payload_length: None,
-            },
-
-            Frame::Crypto { data } => QuicFrame::Crypto {
-                offset: data.off(),
-                length: data.len() as u64,
-            },
-
-            Frame::CryptoHeader { offset, length } => QuicFrame::Crypto {
-                offset: *offset,
-                length: *length as u64,
-            },
-
-            Frame::NewToken { token } => QuicFrame::NewToken {
-                token: qlog::Token {
-                    // TODO: pick the token type some how
-                    ty: Some(qlog::TokenType::Retry),
-                    raw: Some(qlog::events::RawInfo {
-                        data: qlog::HexSlice::maybe_string(Some(token)),
-                        length: Some(token.len() as u64),
+                        length: None,
                         payload_length: None,
-                    }),
-                    details: None,
-                },
-            },
+                    },
+            Frame::ACK {
+                        ack_delay,
+                        ranges,
+                        ecn_counts,
+                    } => {
+                        let ack_ranges = AckedRanges::Double(
+                            ranges.iter().map(|r| (r.start, r.end - 1)).collect(),
+                        );
 
+                        let (ect0, ect1, ce) = match ecn_counts {
+                            Some(ecn) => (
+                                Some(ecn.ect0_count),
+                                Some(ecn.ect1_count),
+                                Some(ecn.ecn_ce_count),
+                            ),
+
+                            None => (None, None, None),
+                        };
+
+                        QuicFrame::Ack {
+                            ack_delay: Some(*ack_delay as f32 / 1000.0),
+                            acked_ranges: Some(ack_ranges),
+                            ect1,
+                            ect0,
+                            ce,
+                            length: None,
+                            payload_length: None,
+                        }
+                    },
+            Frame::ResetStream {
+                        stream_id,
+                        error_code,
+                        final_size,
+                    } => QuicFrame::ResetStream {
+                        stream_id: *stream_id,
+                        error_code: *error_code,
+                        final_size: *final_size,
+                        length: None,
+                        payload_length: None,
+                    },
+            Frame::StopSending {
+                        stream_id,
+                        error_code,
+                    } => QuicFrame::StopSending {
+                        stream_id: *stream_id,
+                        error_code: *error_code,
+                        length: None,
+                        payload_length: None,
+                    },
+            Frame::Crypto { data } => QuicFrame::Crypto {
+                        offset: data.off(),
+                        length: data.len() as u64,
+                    },
+            Frame::CryptoHeader { offset, length } => QuicFrame::Crypto {
+                        offset: *offset,
+                        length: *length as u64,
+                    },
+            Frame::NewToken { token } => QuicFrame::NewToken {
+                        token: qlog::Token {
+                            // TODO: pick the token type some how
+                            ty: Some(qlog::TokenType::Retry),
+                            raw: Some(qlog::events::RawInfo {
+                                data: qlog::HexSlice::maybe_string(Some(token)),
+                                length: Some(token.len() as u64),
+                                payload_length: None,
+                            }),
+                            details: None,
+                        },
+                    },
             Frame::Stream { stream_id, data } => QuicFrame::Stream {
-                stream_id: *stream_id,
-                offset: data.off(),
-                length: data.len() as u64,
-                fin: data.fin().then_some(true),
-                raw: None,
-            },
-
+                        stream_id: *stream_id,
+                        offset: data.off(),
+                        length: data.len() as u64,
+                        fin: data.fin().then_some(true),
+                        raw: None,
+                    },
             Frame::StreamHeader {
-                stream_id,
-                offset,
-                length,
-                fin,
-            } => QuicFrame::Stream {
-                stream_id: *stream_id,
-                offset: *offset,
-                length: *length as u64,
-                fin: fin.then(|| true),
-                raw: None,
-            },
-
+                        stream_id,
+                        offset,
+                        length,
+                        fin,
+                    } => QuicFrame::Stream {
+                        stream_id: *stream_id,
+                        offset: *offset,
+                        length: *length as u64,
+                        fin: fin.then(|| true),
+                        raw: None,
+                    },
             Frame::MaxData { max } => QuicFrame::MaxData { maximum: *max },
-
             Frame::MaxStreamData { stream_id, max } => QuicFrame::MaxStreamData {
-                stream_id: *stream_id,
-                maximum: *max,
-            },
-
+                        stream_id: *stream_id,
+                        maximum: *max,
+                    },
             Frame::MaxStreamsBidi { max } => QuicFrame::MaxStreams {
-                stream_type: StreamType::Bidirectional,
-                maximum: *max,
-            },
-
+                        stream_type: StreamType::Bidirectional,
+                        maximum: *max,
+                    },
             Frame::MaxStreamsUni { max } => QuicFrame::MaxStreams {
-                stream_type: StreamType::Unidirectional,
-                maximum: *max,
-            },
-
+                        stream_type: StreamType::Unidirectional,
+                        maximum: *max,
+                    },
             Frame::DataBlocked { limit } =>
-                QuicFrame::DataBlocked { limit: *limit },
-
+                        QuicFrame::DataBlocked { limit: *limit },
             Frame::StreamDataBlocked { stream_id, limit } =>
-                QuicFrame::StreamDataBlocked {
-                    stream_id: *stream_id,
-                    limit: *limit,
-                },
-
+                        QuicFrame::StreamDataBlocked {
+                            stream_id: *stream_id,
+                            limit: *limit,
+                        },
             Frame::StreamsBlockedBidi { limit } => QuicFrame::StreamsBlocked {
-                stream_type: StreamType::Bidirectional,
-                limit: *limit,
-            },
-
+                        stream_type: StreamType::Bidirectional,
+                        limit: *limit,
+                    },
             Frame::StreamsBlockedUni { limit } => QuicFrame::StreamsBlocked {
-                stream_type: StreamType::Unidirectional,
-                limit: *limit,
-            },
-
+                        stream_type: StreamType::Unidirectional,
+                        limit: *limit,
+                    },
             Frame::NewConnectionId {
-                seq_num,
-                retire_prior_to,
-                conn_id,
-                reset_token,
-            } => QuicFrame::NewConnectionId {
-                sequence_number: *seq_num as u32,
-                retire_prior_to: *retire_prior_to as u32,
-                connection_id_length: Some(conn_id.len() as u8),
-                connection_id: format!("{}", qlog::HexSlice::new(conn_id)),
-                stateless_reset_token: qlog::HexSlice::maybe_string(Some(
-                    reset_token,
-                )),
-            },
-
+                        seq_num,
+                        retire_prior_to,
+                        conn_id,
+                        reset_token,
+                    } => QuicFrame::NewConnectionId {
+                        sequence_number: *seq_num as u32,
+                        retire_prior_to: *retire_prior_to as u32,
+                        connection_id_length: Some(conn_id.len() as u8),
+                        connection_id: format!("{}", qlog::HexSlice::new(conn_id)),
+                        stateless_reset_token: qlog::HexSlice::maybe_string(Some(
+                            reset_token,
+                        )),
+                    },
             Frame::RetireConnectionId { seq_num } =>
-                QuicFrame::RetireConnectionId {
-                    sequence_number: *seq_num as u32,
-                },
-
+                        QuicFrame::RetireConnectionId {
+                            sequence_number: *seq_num as u32,
+                        },
             Frame::PathChallenge { .. } =>
-                QuicFrame::PathChallenge { data: None },
-
+                        QuicFrame::PathChallenge { data: None },
             Frame::PathResponse { .. } => QuicFrame::PathResponse { data: None },
-
             Frame::ConnectionClose {
-                error_code, reason, ..
-            } => QuicFrame::ConnectionClose {
-                error_space: Some(ErrorSpace::TransportError),
-                error_code: Some(*error_code),
-                error_code_value: None, // raw error is no different for us
-                reason: Some(String::from_utf8_lossy(reason).into_owned()),
-                trigger_frame_type: None, // don't know trigger type
-            },
-
+                        error_code, reason, ..
+                    } => QuicFrame::ConnectionClose {
+                        error_space: Some(ErrorSpace::TransportError),
+                        error_code: Some(*error_code),
+                        error_code_value: None, // raw error is no different for us
+                        reason: Some(String::from_utf8_lossy(reason).into_owned()),
+                        trigger_frame_type: None, // don't know trigger type
+                    },
             Frame::ApplicationClose { error_code, reason } => {
-                QuicFrame::ConnectionClose {
-                    error_space: Some(ErrorSpace::ApplicationError),
-                    error_code: Some(*error_code),
-                    error_code_value: None, // raw error is no different for us
-                    reason: Some(String::from_utf8_lossy(reason).into_owned()),
-                    trigger_frame_type: None, // don't know trigger type
-                }
-            },
-
+                        QuicFrame::ConnectionClose {
+                            error_space: Some(ErrorSpace::ApplicationError),
+                            error_code: Some(*error_code),
+                            error_code_value: None, // raw error is no different for us
+                            reason: Some(String::from_utf8_lossy(reason).into_owned()),
+                            trigger_frame_type: None, // don't know trigger type
+                        }
+                    },
             Frame::HandshakeDone => QuicFrame::HandshakeDone,
-
             Frame::Datagram { data } => QuicFrame::Datagram {
-                length: data.len() as u64,
-                raw: None,
-            },
-
+                        length: data.len() as u64,
+                        raw: None,
+                    },
             Frame::DatagramHeader { length } => QuicFrame::Datagram {
-                length: *length as u64,
-                raw: None,
-            },
+                        length: *length as u64,
+                        raw: None,
+                    },
+            Frame::AckFrequency { sequence_number, packet_tolerance, update_max_ack_delay, ignore_order } => todo!(),
         }
     }
 }
@@ -1199,6 +1215,19 @@ impl std::fmt::Debug for Frame {
 
             Frame::DatagramHeader { length } => {
                 write!(f, "DATAGRAM len={length}")?;
+            },
+
+            Frame::AckFrequency {
+                sequence_number,
+                packet_tolerance,
+                update_max_ack_delay,
+                ignore_order,
+            } => {
+                write!(
+                    f,
+                    "ACK_FREQUENCY sequence_number={} packet_tolerenace={} update_max_ack_delay={} ignore_order={}",
+                    sequence_number, packet_tolerance, update_max_ack_delay, ignore_order
+                )?;
             },
         }
 
