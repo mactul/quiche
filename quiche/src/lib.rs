@@ -9238,8 +9238,11 @@ impl TransportParams {
         }
 
         if let Some(min_ack_delay) = tp.min_ack_delay {
-            b.put_u16(0xde1a)?;
-            b.put_u16(octets::varint_len(min_ack_delay) as u16)?;
+            TransportParams::encode_param(
+                &mut b,
+                0xde1a,
+                octets::varint_len(min_ack_delay)
+            )?;
             b.put_varint(min_ack_delay)?;
         }
 
