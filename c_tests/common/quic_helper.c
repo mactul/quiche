@@ -526,17 +526,20 @@ void quic_reply(QuicConnHandler* handler, uint64_t stream_id, uint8_t* content, 
     quiche_h3_send_response(handler->h3_conn, handler->conn, stream_id, headers, sizeof(headers) / sizeof(quiche_h3_header), false);
     while(content_length > 0)
     {
-        ssize_t sended = quiche_h3_send_body(handler->h3_conn, handler->conn, stream_id, content, content_length, true);
-        if(sended > 0)
+        for(int i = 0; i < 100; i++)
         {
-            if((size_t)sended > content_length)
+            ssize_t sended = quiche_h3_send_body(handler->h3_conn, handler->conn, stream_id, content, content_length, true);
+            if(sended > 0)
             {
-                sended = content_length;
+                if((size_t)sended > content_length)
+                {
+                    sended = content_length;
+                }
+                content += sended;
+                content_length -= sended;
             }
-            content += sended;
-            content_length -= sended;
+            process_egress(handler);
         }
-        process_egress(handler);
         process_ingress(handler);
     }
     process_egress(handler);
