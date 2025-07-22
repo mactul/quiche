@@ -418,7 +418,7 @@ use std::str::FromStr;
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use range_buf::DefaultBufFactory;
 use smallvec::SmallVec;
@@ -1672,6 +1672,8 @@ where
 
     /// ACK Frequency config
     ack_frequency: AckFrequency,
+
+    last_send_ack_instant: Instant,
 }
 
 #[derive(Default)]
@@ -2173,6 +2175,8 @@ impl<F: BufFactory> Connection<F> {
             max_amplification_factor: config.max_amplification_factor,
 
             ack_frequency: Default::default(),
+
+            last_send_ack_instant: Instant::now(),
         };
 
         if let Some(odcid) = odcid {
@@ -4211,8 +4215,7 @@ impl<F: BufFactory> Connection<F> {
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
-            (pkt_space.ack_elicited || ack_elicit_required
-                || (pkt_space.recv_pkt_need_ack.is_empty() && self.next_pkt_num % 4 == 0)) &&
+            (ack_elicit_required || pkt_space.ack_elicited && pkt_space.recv_pkt_need_ack.len() >= 2 || self.last_send_ack_instant.elapsed() > Duration::from_millis(self.local_transport_params.max_ack_delay)) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -4220,6 +4223,8 @@ impl<F: BufFactory> Connection<F> {
                         .is_some_and(|le| le.is_app))) &&
             path.active()
         {
+            self.last_send_ack_instant = now;
+
             let ack_delay = pkt_space.largest_rx_pkt_time.elapsed();
 
             let ack_delay = ack_delay.as_micros() as u64 /
