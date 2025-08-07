@@ -1674,6 +1674,8 @@ where
 
     /// Received ACK Frequency config
     recv_ack_frequency: AckFrequency,
+
+    last_send_ack_instant: Instant,
 }
 
 #[derive(Default)]
@@ -2175,6 +2177,8 @@ impl<F: BufFactory> Connection<F> {
             max_amplification_factor: config.max_amplification_factor,
 
             recv_ack_frequency: Default::default(),
+
+            last_send_ack_instant: Instant::now(),
         };
 
         if let Some(odcid) = odcid {
@@ -4213,10 +4217,14 @@ impl<F: BufFactory> Connection<F> {
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
-            (pkt_space.ack_elicited ||
-                ack_elicit_required ||
-                (pkt_space.recv_pkt_need_ack.is_empty() &&
-                    self.next_pkt_num % 4 == 0)) &&
+            (ack_elicit_required ||
+                pkt_space.ack_elicited &&
+                    (pkt_space.recv_pkt_need_ack.len() >= 5 ||
+                        self.last_send_ack_instant.elapsed() >
+                            cmp::min(
+                                Duration::from_micros(100),
+                                path.recovery.rtt(),
+                            ))) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -4245,6 +4253,7 @@ impl<F: BufFactory> Connection<F> {
                 // be bundled considering the buffer capacity only, and not the
                 // available cwnd.
                 if push_frame_to_pkt!(b, frames, frame, left) {
+                    self.last_send_ack_instant = now;
                     pkt_space.ack_elicited = false;
                 }
             }
