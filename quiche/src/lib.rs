@@ -4214,8 +4214,10 @@ impl<F: BufFactory> Connection<F> {
         // generate an ACK (if there's anything to ACK) since we're going to
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
+
+        // TODO always send ACK on close (How to know we are closing ? is_closing doesn't seem to carry this information.)
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
-            (ack_elicit_required || pkt_space.ack_elicited && pkt_space.recv_pkt_need_ack.len() >= 2 || self.last_send_ack_instant.elapsed() > Duration::from_millis(self.local_transport_params.max_ack_delay)) &&
+            (ack_elicit_required || pkt_space.ack_elicited && (pkt_space.recv_pkt_need_ack.len() >= 5 || self.last_send_ack_instant.elapsed() > cmp::min(Duration::from_micros(100), path.recovery.rtt()))) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -4223,8 +4225,6 @@ impl<F: BufFactory> Connection<F> {
                         .is_some_and(|le| le.is_app))) &&
             path.active()
         {
-            self.last_send_ack_instant = now;
-
             let ack_delay = pkt_space.largest_rx_pkt_time.elapsed();
 
             let ack_delay = ack_delay.as_micros() as u64 /
@@ -4246,6 +4246,7 @@ impl<F: BufFactory> Connection<F> {
                 // be bundled considering the buffer capacity only, and not the
                 // available cwnd.
                 if push_frame_to_pkt!(b, frames, frame, left) {
+                    self.last_send_ack_instant = now;
                     pkt_space.ack_elicited = false;
                 }
             }
