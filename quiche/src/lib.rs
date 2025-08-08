@@ -1676,6 +1676,8 @@ where
     recv_ack_frequency: AckFrequency,
 
     last_send_ack_instant: Instant,
+
+    ack_freq_seq_num: u64,
 }
 
 #[derive(Default)]
@@ -2179,6 +2181,8 @@ impl<F: BufFactory> Connection<F> {
             recv_ack_frequency: Default::default(),
 
             last_send_ack_instant: Instant::now(),
+
+            ack_freq_seq_num: 0,
         };
 
         if let Some(odcid) = odcid {
@@ -4265,6 +4269,49 @@ impl<F: BufFactory> Connection<F> {
             // Bytes consumed by ACK frames.
             cwnd_available.saturating_sub(left_before_packing_ack_frame - left),
         );
+
+        if pkt_type == packet::Type::Short &&
+            path.active() &&
+            path.recovery.is_ack_freq_required() &&
+            self.handshake_completed &&
+            self.peer_transport_params.min_ack_delay.is_some()
+        {
+            let rtt = path.recovery.rtt();
+
+            let seq_num = self.ack_freq_seq_num + 1;
+
+            // We use 3/4 of the smoothed_rtt, it's an arbitrary value but it's
+            // less than the smoothed_rtt on purpose. Like this, we can sure that
+            // delaying packets will not have an effect on the congestion control.
+            let update_max_ack_delay = cmp::max(
+                self.peer_transport_params.min_ack_delay.unwrap(),
+                (3 * rtt.as_micros() / 4) as u64,
+            );
+
+            let frame = frame::Frame::AckFrequency {
+                sequence_number: seq_num,
+                packet_tolerance: 1,
+                update_max_ack_delay,
+                ignore_order: true,
+            };
+
+            trace!(
+                "{} sending ack frequency seq_num={}, pkt_tol={}, max_ack_delay={}, ignore_order={}",
+                self.trace_id,
+                seq_num,
+                1,
+                update_max_ack_delay,
+                1,
+            );
+
+            if push_frame_to_pkt!(b, frames, frame, left) {
+                path.recovery.set_ack_freq_send(rtt);
+                self.ack_freq_seq_num = seq_num;
+
+                ack_eliciting = true;
+                in_flight = true;
+            }
+        }
 
         let mut challenge_data = None;
 
@@ -8116,7 +8163,8 @@ impl<F: BufFactory> Connection<F> {
                     // Check and update sequence_number if valid
                     if let Some(seq) = self.recv_ack_frequency.sequence_number {
                         if seq >= sequence_number {
-                            return Err(Error::InvalidFrame);
+                            // already received, ignore
+                            return Ok(());
                         }
                     }
                     self.recv_ack_frequency.sequence_number =
