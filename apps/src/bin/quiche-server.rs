@@ -122,6 +122,7 @@ fn main() {
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
+    config.ext_set_min_ack_delay(2);
 
     config.enable_pacing(pacing);
 

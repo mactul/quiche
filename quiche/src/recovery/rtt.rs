@@ -48,6 +48,10 @@ pub struct RttStats {
     pub(super) max_ack_delay: Duration,
 
     pub(super) has_first_rtt_sample: bool,
+
+    ack_freq_last_used_rtt: Duration,
+
+    pub(super) ack_freq_required: bool,
 }
 
 impl std::fmt::Debug for RttStats {
@@ -71,6 +75,8 @@ impl RttStats {
             rttvar: INITIAL_RTT / 2,
             has_first_rtt_sample: false,
             max_ack_delay,
+            ack_freq_last_used_rtt: INITIAL_RTT,
+            ack_freq_required: false,
         }
     }
 
@@ -86,6 +92,9 @@ impl RttStats {
             self.max_rtt = latest_rtt;
             self.rttvar = latest_rtt / 2;
             self.has_first_rtt_sample = true;
+            self.ack_freq_last_used_rtt = latest_rtt;
+            self.ack_freq_required = true;
+            println!("ACK Freq Needed (initial) !");
             return;
         }
 
@@ -114,6 +123,23 @@ impl RttStats {
             );
 
         self.smoothed_rtt = self.smoothed_rtt * 7 / 8 + adjusted_rtt / 8;
+
+        if !self.ack_freq_required && 2.0 * self.smoothed_rtt.abs_diff(self.ack_freq_last_used_rtt).div_duration_f32(self.smoothed_rtt + self.ack_freq_last_used_rtt) > 0.5
+        {
+            // send AckFrequency frame if the smoothed rtt is modified by at least 50% since the last AckFrequency frame was sent
+            // This value is arbitrary since the draft don't specify anything
+            self.ack_freq_required = true;
+            println!("ACK Freq Needed !");
+        }
+    }
+
+    pub(crate) fn set_ack_freq_send(&mut self, used_rtt: Duration) {
+        self.ack_freq_last_used_rtt = used_rtt;
+        self.ack_freq_required = false;
+    }
+
+    pub(crate) fn is_ack_freq_required(&self) -> bool {
+        self.ack_freq_required
     }
 
     pub(crate) fn rtt(&self) -> Duration {

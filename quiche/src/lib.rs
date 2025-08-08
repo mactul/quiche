@@ -4259,6 +4259,26 @@ impl<F: BufFactory> Connection<F> {
             cwnd_available.saturating_sub(left_before_packing_ack_frame - left),
         );
 
+
+        if pkt_type == packet::Type::Short && path.active() && path.recovery.is_ack_freq_required() && self.handshake_completed
+        {
+            println!("ACK Freq sent !");
+            let rtt = path.recovery.rtt();
+            let mut seq_num = 0;
+            if let Some(seq_num_temp) = self.ack_frequency.sequence_number
+            {
+                seq_num = seq_num_temp;
+            }
+            let frame = frame::Frame::AckFrequency { sequence_number: seq_num, packet_tolerance: 1, update_max_ack_delay: rtt.as_micros() as u64, ignore_order: true };
+
+            if push_frame_to_pkt!(b, frames, frame, left) {
+                path.recovery.set_ack_freq_send(rtt);
+
+                ack_eliciting = true;
+                in_flight = true;
+            }
+        }
+
         let mut challenge_data = None;
 
         let active_path = self.paths.get_active_mut()?;
@@ -8107,12 +8127,12 @@ impl<F: BufFactory> Connection<F> {
                     self.local_transport_params.min_ack_delay
                 {
                     // Check and update sequence_number if valid
-                    if let Some(seq) = self.ack_frequency.sequence_number {
-                        if seq >= sequence_number {
-                            return Err(Error::InvalidFrame);
-                        }
-                    }
-                    self.ack_frequency.sequence_number = Some(sequence_number);
+                    // if let Some(seq) = self.ack_frequency.sequence_number {
+                    //     if seq >= sequence_number {
+                    //         return Err(Error::InvalidFrame);
+                    //     }
+                    // }
+                    // self.ack_frequency.sequence_number = Some(sequence_number);
 
                     if packet_tolerance > 0 {
                         self.ack_frequency.packet_tolerance = packet_tolerance;
@@ -8126,6 +8146,9 @@ impl<F: BufFactory> Connection<F> {
                     }
 
                     self.ack_frequency.ignore_order = ignore_order;
+
+                    println!("Received AckFrequency {}", self.local_transport_params.max_ack_delay);
+
                 } else {
                     // AckFrequency Extension is not supported
                     return Err(Error::InvalidFrame);
