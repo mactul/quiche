@@ -1682,6 +1682,8 @@ where
     ack_frequency: AckFrequency,
 
     last_send_ack_instant: Instant,
+
+    ack_freq_received: bool,
 }
 
 #[derive(Default)]
@@ -2185,6 +2187,8 @@ impl<F: BufFactory> Connection<F> {
             ack_frequency: Default::default(),
 
             last_send_ack_instant: Instant::now(),
+
+            ack_freq_received: false,
         };
 
         if let Some(odcid) = odcid {
@@ -4225,7 +4229,8 @@ impl<F: BufFactory> Connection<F> {
 
         // TODO always send ACK on close (How to know we are closing ? is_closing doesn't seem to carry this information.)
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
-            (ack_elicit_required || pkt_space.ack_elicited && (pkt_space.recv_pkt_need_ack.len() >= 5 || self.last_send_ack_instant.elapsed() > cmp::min(Duration::from_micros(100), path.recovery.rtt()))) &&
+            (ack_elicit_required ||
+                pkt_space.ack_elicited && (!self.ack_freq_received || pkt_space.recv_pkt_need_ack.len() >= 5 || self.last_send_ack_instant.elapsed() > self.local_transport_params.max_ack_delay)) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -4270,7 +4275,7 @@ impl<F: BufFactory> Connection<F> {
 
         if pkt_type == packet::Type::Short && path.active() && path.recovery.is_ack_freq_required() && self.handshake_completed && self.peer_transport_params.min_ack_delay.is_some()
         {
-            println!("ACK Freq sent !");
+            trace!("ACK Freq sent !");
             let rtt = path.recovery.rtt();
             let mut seq_num = 0;
             if let Some(seq_num_temp) = self.ack_frequency.sequence_number
@@ -8154,7 +8159,9 @@ impl<F: BufFactory> Connection<F> {
 
                     self.ack_frequency.ignore_order = ignore_order;
 
-                    println!("Received AckFrequency {:?}", self.local_transport_params.max_ack_delay);
+                    trace!("Received AckFrequency {:?}", self.local_transport_params.max_ack_delay);
+
+                    self.ack_freq_received = true;
 
                 } else {
                     // AckFrequency Extension is not supported

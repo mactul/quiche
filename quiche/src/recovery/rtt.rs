@@ -94,7 +94,7 @@ impl RttStats {
             self.has_first_rtt_sample = true;
             self.ack_freq_last_used_rtt = latest_rtt;
             self.ack_freq_required = true;
-            println!("ACK Freq Needed (initial) !");
+            trace!("ACK Freq Needed (initial) !");
             return;
         }
 
@@ -129,7 +129,7 @@ impl RttStats {
             // send AckFrequency frame if the smoothed rtt is modified by at least 50% since the last AckFrequency frame was sent
             // This value is arbitrary since the draft don't specify anything
             self.ack_freq_required = true;
-            println!("ACK Freq Needed !");
+            trace!("ACK Freq Needed !");
         }
     }
 
