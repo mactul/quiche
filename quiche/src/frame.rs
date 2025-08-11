@@ -191,6 +191,8 @@ pub enum Frame {
         update_max_ack_delay: u64,
         reordering_threshold: u64,
     },
+
+    ImmediateAck,
 }
 
 impl Frame {
@@ -335,6 +337,8 @@ impl Frame {
             },
 
             0x1e => Frame::HandshakeDone,
+
+            0x1f => Frame::ImmediateAck,
 
             0x30 | 0x31 => parse_datagram_frame(frame_type, b)?,
 
@@ -600,6 +604,10 @@ impl Frame {
                 b.put_varint(0x1e)?;
             },
 
+            Frame::ImmediateAck => {
+                b.put_varint(0x1f)?;
+            },
+
             Frame::Datagram { data } => {
                 encode_dgram_header(data.len() as u64, b)?;
 
@@ -825,6 +833,10 @@ impl Frame {
                 1 // frame type
             },
 
+            Frame::ImmediateAck => {
+                1 // frame type
+            },
+
             Frame::Datagram { data } => {
                 1 + // frame type
                 2 + // length, always encode as 2-byte varint
@@ -1040,6 +1052,9 @@ impl Frame {
                 }
             },
             Frame::HandshakeDone => QuicFrame::HandshakeDone,
+
+            Frame::ImmediateAck => todo!(),
+
             Frame::Datagram { data } => QuicFrame::Datagram {
                 length: data.len() as u64,
                 raw: None,
@@ -1212,6 +1227,10 @@ impl std::fmt::Debug for Frame {
 
             Frame::HandshakeDone => {
                 write!(f, "HANDSHAKE_DONE")?;
+            },
+
+            Frame::ImmediateAck => {
+                write!(f, "IMMEDIATE_ACK")?;
             },
 
             Frame::Datagram { data } => {
