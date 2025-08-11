@@ -189,7 +189,7 @@ pub enum Frame {
         sequence_number: u64,
         packet_tolerance: u64,
         update_max_ack_delay: u64,
-        ignore_order: bool,
+        reordering_threshold: u64,
     },
 }
 
@@ -342,7 +342,7 @@ impl Frame {
                 sequence_number: b.get_varint()?,
                 packet_tolerance: b.get_varint()?,
                 update_max_ack_delay: b.get_varint()?,
-                ignore_order: b.get_u8()? != 0,
+                reordering_threshold: b.get_varint()?,
             },
 
             _ => return Err(Error::InvalidFrame),
@@ -612,14 +612,14 @@ impl Frame {
                 sequence_number,
                 packet_tolerance,
                 update_max_ack_delay,
-                ignore_order,
+                reordering_threshold,
             } => {
                 b.put_varint(0xaf)?;
 
                 b.put_varint(*sequence_number)?;
                 b.put_varint(*packet_tolerance)?;
                 b.put_varint(*update_max_ack_delay)?;
-                b.put_u8(*ignore_order as u8)?;
+                b.put_varint(*reordering_threshold)?;
             },
         }
 
@@ -841,13 +841,13 @@ impl Frame {
                 sequence_number,
                 packet_tolerance,
                 update_max_ack_delay,
-                ..
+                reordering_threshold,
             } => {
                 octets::varint_len(0xaf) + // frame type
                 octets::varint_len(*sequence_number) + // sequence_number
                 octets::varint_len(*packet_tolerance) + // packet_tolerance
                 octets::varint_len(*update_max_ack_delay) + // update_max_ack_delay
-                1 // ignore_order
+                octets::varint_len(*reordering_threshold) // reordering_threshold
             },
         }
     }
@@ -1048,7 +1048,7 @@ impl Frame {
                         length: *length as u64,
                         raw: None,
                     },
-            Frame::AckFrequency { sequence_number, packet_tolerance, update_max_ack_delay, ignore_order } => todo!(),
+            Frame::AckFrequency { sequence_number, packet_tolerance, update_max_ack_delay, reordering_threshold } => todo!(),
         }
     }
 }
@@ -1221,12 +1221,12 @@ impl std::fmt::Debug for Frame {
                 sequence_number,
                 packet_tolerance,
                 update_max_ack_delay,
-                ignore_order,
+                reordering_threshold,
             } => {
                 write!(
                     f,
-                    "ACK_FREQUENCY sequence_number={} packet_tolerenace={} update_max_ack_delay={} ignore_order={}",
-                    sequence_number, packet_tolerance, update_max_ack_delay, ignore_order
+                    "ACK_FREQUENCY sequence_number={} packet_tolerenace={} update_max_ack_delay={} reordering_threshold={}",
+                    sequence_number, packet_tolerance, update_max_ack_delay, reordering_threshold
                 )?;
             },
         }
@@ -2153,7 +2153,7 @@ mod tests {
     fn ack_frequency() {
         let mut d = [42; 128];
 
-        let frame = Frame::AckFrequency { sequence_number: 32, packet_tolerance: 1, update_max_ack_delay: 67, ignore_order: false};
+        let frame = Frame::AckFrequency { sequence_number: 32, packet_tolerance: 1, update_max_ack_delay: 67, reordering_threshold: 1};
 
         let wire_len = {
             let mut b = octets::OctetsMut::with_slice(&mut d);

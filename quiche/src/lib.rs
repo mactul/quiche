@@ -1690,7 +1690,7 @@ where
 struct AckFrequency {
     sequence_number: Option<u64>,
     packet_tolerance: u64,
-    ignore_order: bool,
+    reordering_threshold: u64,
 }
 
 /// Creates a new server-side connection.
@@ -4282,7 +4282,14 @@ impl<F: BufFactory> Connection<F> {
             {
                 seq_num = seq_num_temp;
             }
-            let frame = frame::Frame::AckFrequency { sequence_number: seq_num, packet_tolerance: 1, update_max_ack_delay: cmp::max(self.peer_transport_params.min_ack_delay.unwrap(), rtt.as_micros() as u64), ignore_order: true };
+            let frame = frame::Frame::AckFrequency {
+                sequence_number: seq_num,
+                packet_tolerance: 1,
+                // We use 3/4 of the smoothed_rtt, it's an arbitrary value but it's less than the smoothed_rtt on purpose.
+                // Like this, we can sure that delaying packets will not have an effect on the congestion control.
+                update_max_ack_delay: cmp::max(self.peer_transport_params.min_ack_delay.unwrap(), (3 * rtt.as_micros() / 4) as u64),
+                reordering_threshold: 1
+            };
 
             if push_frame_to_pkt!(b, frames, frame, left) {
                 path.recovery.set_ack_freq_send(rtt);
@@ -8133,7 +8140,7 @@ impl<F: BufFactory> Connection<F> {
                 sequence_number,
                 packet_tolerance,
                 update_max_ack_delay,
-                ignore_order,
+                reordering_threshold,
             } =>
                 if let Some(min_ack_delay) =
                     self.local_transport_params.min_ack_delay
@@ -8157,7 +8164,7 @@ impl<F: BufFactory> Connection<F> {
                             Duration::from_micros(update_max_ack_delay);
                     }
 
-                    self.ack_frequency.ignore_order = ignore_order;
+                    self.ack_frequency.reordering_threshold = reordering_threshold;
 
                     trace!("Received AckFrequency {:?}", self.local_transport_params.max_ack_delay);
 
