@@ -4260,7 +4260,7 @@ impl<F: BufFactory> Connection<F> {
         );
 
 
-        if pkt_type == packet::Type::Short && path.active() && path.recovery.is_ack_freq_required() && self.handshake_completed
+        if pkt_type == packet::Type::Short && path.active() && path.recovery.is_ack_freq_required() && self.handshake_completed && self.peer_transport_params.min_ack_delay.is_some()
         {
             println!("ACK Freq sent !");
             let rtt = path.recovery.rtt();
