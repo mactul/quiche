@@ -1684,6 +1684,8 @@ where
     last_send_ack_instant: Instant,
 
     ack_freq_received: bool,
+
+    ack_freq_seq_num: u64,
 }
 
 #[derive(Default)]
@@ -2189,6 +2191,8 @@ impl<F: BufFactory> Connection<F> {
             last_send_ack_instant: Instant::now(),
 
             ack_freq_received: false,
+
+            ack_freq_seq_num: 0,
         };
 
         if let Some(odcid) = odcid {
@@ -4277,11 +4281,7 @@ impl<F: BufFactory> Connection<F> {
         {
             trace!("ACK Freq sent !");
             let rtt = path.recovery.rtt();
-            let mut seq_num = 0;
-            if let Some(seq_num_temp) = self.ack_frequency.sequence_number
-            {
-                seq_num = seq_num_temp;
-            }
+            let seq_num = self.ack_freq_seq_num + 1;
             let frame = frame::Frame::AckFrequency {
                 sequence_number: seq_num,
                 packet_tolerance: 1,
@@ -4293,6 +4293,7 @@ impl<F: BufFactory> Connection<F> {
 
             if push_frame_to_pkt!(b, frames, frame, left) {
                 path.recovery.set_ack_freq_send(rtt);
+                self.ack_freq_seq_num = seq_num;
 
                 ack_eliciting = true;
                 in_flight = true;
@@ -8146,12 +8147,13 @@ impl<F: BufFactory> Connection<F> {
                     self.local_transport_params.min_ack_delay
                 {
                     // Check and update sequence_number if valid
-                    // if let Some(seq) = self.ack_frequency.sequence_number {
-                    //     if seq >= sequence_number {
-                    //         return Err(Error::InvalidFrame);
-                    //     }
-                    // }
-                    // self.ack_frequency.sequence_number = Some(sequence_number);
+                    if let Some(seq) = self.ack_frequency.sequence_number {
+                        if seq >= sequence_number {
+                            // already received, ignore
+                            return Ok(());
+                        }
+                    }
+                    self.ack_frequency.sequence_number = Some(sequence_number);
 
                     if packet_tolerance > 0 {
                         self.ack_frequency.packet_tolerance = packet_tolerance;
