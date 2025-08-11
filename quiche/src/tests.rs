@@ -50,6 +50,7 @@ fn transport_params() {
         retry_source_connection_id: Some(b"retry".to_vec().into()),
         max_datagram_frame_size: Some(32),
         unknown_params: Default::default(),
+        min_ack_delay: None,
     };
 
     let mut raw_params = [42; 256];
@@ -80,6 +81,7 @@ fn transport_params() {
         retry_source_connection_id: None,
         max_datagram_frame_size: Some(32),
         unknown_params: Default::default(),
+        min_ack_delay: None,
     };
 
     let mut raw_params = [42; 256];
