@@ -4282,7 +4282,7 @@ impl<F: BufFactory> Connection<F> {
             {
                 seq_num = seq_num_temp;
             }
-            let frame = frame::Frame::AckFrequency { sequence_number: seq_num, packet_tolerance: 1, update_max_ack_delay: rtt.as_micros() as u64, ignore_order: true };
+            let frame = frame::Frame::AckFrequency { sequence_number: seq_num, packet_tolerance: 1, update_max_ack_delay: cmp::max(self.peer_transport_params.min_ack_delay.unwrap(), rtt.as_micros() as u64), ignore_order: true };
 
             if push_frame_to_pkt!(b, frames, frame, left) {
                 path.recovery.set_ack_freq_send(rtt);
