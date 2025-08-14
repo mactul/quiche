@@ -4077,6 +4077,10 @@ impl<F: BufFactory> Connection<F> {
                         p.pmtud.pmtu_probe_lost();
                     },
 
+                    frame::Frame::AckFrequency { .. } => {
+                        p.recovery.mark_ack_freq_as_required();
+                    },
+
                     _ => (),
                 }
             }
