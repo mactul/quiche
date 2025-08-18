@@ -1056,7 +1056,7 @@ impl Frame {
             },
             Frame::HandshakeDone => QuicFrame::HandshakeDone,
 
-            Frame::ImmediateAck => todo!(),
+            Frame::ImmediateAck => QuicFrame::ImmediateAck,
 
             Frame::Datagram { data } => QuicFrame::Datagram {
                 length: data.len() as u64,
@@ -1071,7 +1071,12 @@ impl Frame {
                 packet_tolerance,
                 update_max_ack_delay,
                 reordering_threshold,
-            } => todo!(),
+            } => QuicFrame::AckFrequency {
+                sequence_number: *sequence_number,
+                packet_tolerance: *packet_tolerance,
+                update_max_ack_delay: *update_max_ack_delay,
+                reordering_threshold: *reordering_threshold,
+            },
         }
     }
 }
