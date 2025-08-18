@@ -507,6 +507,16 @@ const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
 // The send capacity factor.
 const TX_CAP_FACTOR: f64 = 1.0;
 
+// The default reordering threshold that will be sent to the peer on
+// AckFrequency frame
+// It can be set the same as recovery::INITIAL_PACKET_THRESHOLD (3)
+// https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-setting-the-reordering-thre
+const DEFAULT_ACK_FREQ_REORDERING_THRESHOLD: u64 = 3;
+
+// The default packet tolerance that will be sent to the peer on AckFrequency
+// frame
+const DEFAULT_ACK_FREQ_PACKET_TOLERANCE: u64 = 5;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -841,6 +851,9 @@ pub struct Config {
     disable_dcid_reuse: bool,
 
     track_unknown_transport_params: Option<usize>,
+
+    ack_freq_reordering_threshold: u64,
+    ack_freq_packet_tolerance: u64,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -914,6 +927,9 @@ impl Config {
             disable_dcid_reuse: false,
 
             track_unknown_transport_params: None,
+
+            ack_freq_reordering_threshold: DEFAULT_ACK_FREQ_REORDERING_THRESHOLD,
+            ack_freq_packet_tolerance: DEFAULT_ACK_FREQ_PACKET_TOLERANCE,
         })
     }
 
@@ -1282,6 +1298,18 @@ impl Config {
     /// peer.
     pub fn ext_set_min_ack_delay(&mut self, v: u64) {
         self.local_transport_params.min_ack_delay = Some(v);
+    }
+
+    /// Set the reordering threshold value that will be requested in
+    /// AckFrequency frames
+    pub fn ext_set_ack_freq_reordering_threshold(&mut self, v: u64) {
+        self.ack_freq_reordering_threshold = v;
+    }
+
+    /// Set the packet tolerance value that will be requested in AckFrequency
+    /// frames
+    pub fn ext_set_ack_freq_packet_tolerance(&mut self, v: u64) {
+        self.ack_freq_packet_tolerance = v;
     }
 
     /// Sets the `disable_active_migration` transport parameter.
@@ -1685,9 +1713,10 @@ where
     /// Received ACK Frequency config
     recv_ack_frequency: Option<AckFrequency>,
 
-    last_send_ack_instant: Instant,
+    // ACK Frequency config to send to the peer
+    to_send_ack_frequency: AckFrequency,
 
-    ack_freq_seq_num: u64,
+    last_send_ack_instant: Instant,
 
     immediate_ack_pending: bool,
 
@@ -2198,9 +2227,13 @@ impl<F: BufFactory> Connection<F> {
 
             recv_ack_frequency: None,
 
-            last_send_ack_instant: Instant::now(),
+            to_send_ack_frequency: AckFrequency {
+                sequence_number: 0,
+                packet_tolerance: config.ack_freq_packet_tolerance,
+                reordering_threshold: config.ack_freq_reordering_threshold,
+            },
 
-            ack_freq_seq_num: 0,
+            last_send_ack_instant: Instant::now(),
 
             immediate_ack_pending: false,
 
@@ -4350,7 +4383,7 @@ impl<F: BufFactory> Connection<F> {
         {
             let rtt = path.recovery.rtt();
 
-            let seq_num = self.ack_freq_seq_num + 1;
+            let seq_num = self.to_send_ack_frequency.sequence_number + 1;
 
             // We use 3/4 of the smoothed_rtt, it's an arbitrary value but it's
             // less than the smoothed_rtt on purpose. Like this, we can sure that
@@ -4362,23 +4395,25 @@ impl<F: BufFactory> Connection<F> {
 
             let frame = frame::Frame::AckFrequency {
                 sequence_number: seq_num,
-                packet_tolerance: 5,
+                packet_tolerance: self.to_send_ack_frequency.packet_tolerance,
                 update_max_ack_delay,
-                reordering_threshold: 100,
+                reordering_threshold: self
+                    .to_send_ack_frequency
+                    .reordering_threshold,
             };
 
             trace!(
                 "{} sending ack frequency seq_num={}, pkt_tol={}, max_ack_delay={}, reordering_threshold={}",
                 self.trace_id,
                 seq_num,
-                5,
+                self.to_send_ack_frequency.packet_tolerance,
                 update_max_ack_delay,
-                100,
+                self.to_send_ack_frequency.reordering_threshold,
             );
 
             if push_frame_to_pkt!(b, frames, frame, left) {
                 path.recovery.set_ack_freq_send(rtt);
-                self.ack_freq_seq_num = seq_num;
+                self.to_send_ack_frequency.sequence_number = seq_num;
 
                 ack_eliciting = true;
                 in_flight = true;
