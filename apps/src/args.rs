@@ -54,6 +54,7 @@ pub struct CommonArgs {
     pub qpack_max_table_capacity: Option<u64>,
     pub qpack_blocked_streams: Option<u64>,
     pub initial_cwnd_packets: u64,
+    pub min_ack_delay: Option<u64>,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
@@ -192,6 +193,12 @@ impl Args for CommonArgs {
             .parse::<u64>()
             .unwrap();
 
+        let min_ack_delay = if args.get_str("--min-ack-delay") != "" {
+            Some(args.get_str("--min-ack-delay").parse::<u64>().unwrap())
+        } else {
+            None
+        };
+
         CommonArgs {
             alpns,
             max_data,
@@ -215,6 +222,7 @@ impl Args for CommonArgs {
             qpack_max_table_capacity,
             qpack_blocked_streams,
             initial_cwnd_packets,
+            min_ack_delay,
         }
     }
 }
@@ -244,6 +252,7 @@ impl Default for CommonArgs {
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             initial_cwnd_packets: 10,
+            min_ack_delay: None,
         }
     }
 }
@@ -290,6 +299,7 @@ Options:
   --session-file PATH      File used to cache a TLS session for resumption.
   --source-port PORT       Source port to use when connecting to the server [default: 0].
   --initial-cwnd-packets PACKETS   The initial congestion window size in terms of packet count [default: 10].
+  --min-ack-delay MICROSECONDS  Enable the delayed ack extension with the specified min_ack_delay.
   -h --help                Show this screen.
 ";
 
@@ -464,6 +474,7 @@ Options:
   --qpack-blocked-streams STREAMS   Limit of streams that can be blocked while decoding. Any value other that 0 is currently unsupported.
   --disable-pacing            Disable pacing (linux only).
   --initial-cwnd-packets PACKETS      The initial congestion window size in terms of packet count [default: 10].
+  --min-ack-delay MICROSECONDS  Enable the delayed ack extension with the specified min_ack_delay.
   -h --help                   Show this screen.
 ";
 
